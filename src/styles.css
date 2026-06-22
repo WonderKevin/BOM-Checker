@@ -1,0 +1,298 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, Arial, sans-serif;
+  background: #f4f7fb;
+  color: #0f172a;
+}
+
+.app {
+  display: flex;
+  min-height: 100vh;
+}
+
+.sidebar {
+  width: 240px;
+  background: linear-gradient(180deg, #0f172a, #111827);
+  color: white;
+  padding: 24px 16px;
+}
+
+.sidebar h2 {
+  margin: 0 0 28px;
+  font-size: 22px;
+}
+
+.sidebar button {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #cbd5e1;
+  padding: 12px 14px;
+  text-align: left;
+  border-radius: 10px;
+  margin-bottom: 8px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sidebar button.active,
+.sidebar button:hover {
+  background: #2563eb;
+  color: white;
+}
+
+.main {
+  flex: 1;
+  padding: 28px;
+  overflow: hidden;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 22px;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 32px;
+}
+
+.topbar p {
+  margin: 6px 0 0;
+  color: #64748b;
+}
+
+.top-actions {
+  display: flex;
+  gap: 8px;
+}
+
+button {
+  border: 0;
+  background: #2563eb;
+  color: white;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #1d4ed8;
+}
+
+button.ghost,
+.ghost {
+  background: white;
+  color: #0f172a;
+  border: 1px solid #cbd5e1;
+}
+
+.notice {
+  background: #dbeafe;
+  color: #1e3a8a;
+  padding: 14px 16px;
+  border-radius: 12px;
+  margin-bottom: 18px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+  color: #64748b;
+}
+
+.tableCard {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+}
+
+.tableWrap {
+  overflow: auto;
+  max-width: 100%;
+  max-height: calc(100vh - 210px);
+}
+
+table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  min-width: max-content;
+  font-size: 14px;
+}
+
+th {
+  background: #f1f5f9;
+  color: #0f172a;
+  font-weight: 800;
+  position: sticky;
+  top: 0;
+  z-index: 4;
+}
+
+thead tr:nth-child(2) th {
+  top: 38px;
+}
+
+th,
+td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  white-space: nowrap;
+  text-align: right;
+}
+
+th:first-child,
+td:first-child,
+th:nth-child(2),
+td:nth-child(2) {
+  text-align: left;
+}
+
+tbody tr:hover td {
+  background: #f8fafc;
+}
+
+.sticky-col {
+  position: sticky;
+  background: white;
+  z-index: 5;
+}
+
+thead .sticky-col {
+  background: #f1f5f9;
+  z-index: 8;
+}
+
+.sticky-desc {
+  left: 0;
+  min-width: 300px;
+}
+
+.sticky-code {
+  left: 300px;
+  min-width: 130px;
+}
+
+.summary {
+  min-width: 420px;
+  white-space: normal;
+  text-align: left;
+  background: #ecfdf5;
+}
+
+.good {
+  color: #047857;
+  font-weight: 800;
+}
+
+.bad {
+  color: #b91c1c;
+  font-weight: 800;
+}
+
+.totalRow td {
+  background: #eff6ff;
+  font-weight: 900;
+  border-top: 2px solid #2563eb;
+}
+
+.itemForm {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.itemForm input,
+select,
+input[type="file"] {
+  border: 1px solid #cbd5e1;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: white;
+}
+
+.itemForm input {
+  min-width: 260px;
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 50;
+}
+
+.box {
+  background: white;
+  border-radius: 18px;
+  padding: 26px;
+  width: 440px;
+  box-shadow: 0 25px 80px rgba(15, 23, 42, 0.35);
+}
+
+.box h2 {
+  margin-top: 0;
+}
+
+.box label {
+  display: block;
+  font-weight: 800;
+  margin-top: 14px;
+}
+
+.box select,
+.box input {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+}
+
+.hint {
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.summary-neutral {
+  background: white !important;
+}
+
+.summary-green {
+  background: #d9ead3 !important;
+}
+
+.summary-red {
+  background: #ff6060 !important;
+  color: #111827;
+  font-weight: 800;
+}
+
+.download {
+  background: #16a34a;
+}
+
+.download:hover {
+  background: #15803d;
+}
