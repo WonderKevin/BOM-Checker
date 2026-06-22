@@ -51,6 +51,10 @@ function norm(v) {
   return String(v ?? "").trim().toLowerCase();
 }
 
+function compact(v) {
+  return String(v ?? "").replace(/\s+/g, "").toUpperCase();
+}
+
 function num(v) {
   if (v === null || v === undefined || v === "") return 0;
   const n = Number(String(v).replace(/,/g, "").replace("%", ""));
@@ -71,9 +75,7 @@ function varianceValue(wm, cbf) {
   cbf = Number(cbf || 0);
 
   if (wm === 0 && cbf === 0) return 0;
-
   if (wm === 0 && cbf > 0) return 100;
-
   if (wm > 0 && cbf === 0) return -100;
 
   return ((cbf - wm) / wm) * 100;
@@ -109,9 +111,7 @@ function batchSummaryText(name, wm, cbf) {
   if (diff > 0) {
     return `${name}: There is a ${pct.toFixed(
       2
-    )}% surplus. CBF used ${diff.toFixed(
-      2
-    )} lbs more than WM expected.`;
+    )}% surplus. CBF used ${diff.toFixed(2)} lbs more than WM expected.`;
   }
 
   return `${name}: There is a ${pct.toFixed(
@@ -120,21 +120,25 @@ function batchSummaryText(name, wm, cbf) {
 }
 
 function extractFirstEachQty(text) {
+  const clean = String(text || "").replace(/\s+/g, " ");
   const matches = [
-    ...String(text || "").matchAll(/([0-9][0-9,]*\.?[0-9]*)\s*each\b/gi),
+    ...clean.matchAll(/([0-9][0-9,]*\.?[0-9]*)\s*each\b/gi),
   ];
 
   if (!matches.length) return null;
   return num(matches[0][1]);
 }
 
-function extractLastLbQty(text) {
+function extractFirstLbQty(text) {
+  const clean = String(text || "").replace(/\s+/g, " ");
+  const beforeCost = clean.split("$")[0];
+
   const matches = [
-    ...String(text || "").matchAll(/([0-9][0-9,]*\.?[0-9]*)\s*lb\.?\b/gi),
+    ...beforeCost.matchAll(/([0-9][0-9,]*\.?[0-9]*)\s*lb\.?\b/gi),
   ];
 
   if (!matches.length) return null;
-  return num(matches[matches.length - 1][1]);
+  return num(matches[0][1]);
 }
 
 function isPackagingCode(code) {
@@ -149,7 +153,6 @@ async function extractPdfLines(file) {
   for (let p = 1; p <= pdf.numPages; p++) {
     const page = await pdf.getPage(p);
     const content = await page.getTextContent();
-
     const buckets = new Map();
 
     content.items.forEach((item) => {
@@ -162,7 +165,13 @@ async function extractPdfLines(file) {
     });
 
     [...buckets.entries()]
-      .sort((a, b) => Number(b[0].split("-")[1]) - Number(a[0].split("-")[1]))
+      .sort((a, b) => {
+        const [pageA, yA] = a[0].split("-").map(Number);
+        const [pageB, yB] = b[0].split("-").map(Number);
+
+        if (pageA !== pageB) return pageA - pageB;
+        return yB - yA;
+      })
       .forEach(([, parts]) => {
         const text = parts
           .sort((a, b) => a.x - b.x)
@@ -233,13 +242,13 @@ async function parseWmExcel(file, items) {
 function findPdfUsageForCode(lines, code) {
   let total = 0;
   let found = false;
-  const codeUpper = String(code || "").toUpperCase();
-  const packaging = isPackagingCode(codeUpper);
+  const codeCompact = compact(code);
+  const packaging = isPackagingCode(code);
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] || "";
 
-    if (!line.toUpperCase().includes(codeUpper)) continue;
+    if (!compact(line).includes(codeCompact)) continue;
 
     let usage = null;
 
@@ -247,26 +256,32 @@ function findPdfUsageForCode(lines, code) {
       usage = extractFirstEachQty(line);
 
       if (usage === null) {
-        const forwardBlock = lines.slice(i, i + 3).join(" ");
-        usage = extractFirstEachQty(forwardBlock);
+        usage = extractFirstEachQty(lines.slice(i, i + 3).join(" "));
       }
     } else {
-      for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
+      for (let j = i - 1; j >= Math.max(0, i - 4); j--) {
         const previousLine = lines[j] || "";
+        const lower = previousLine.toLowerCase();
 
         if (
-          previousLine.toLowerCase().includes("historical") ||
-          previousLine.toLowerCase().includes("cost")
+          lower.includes("historical") ||
+          lower.includes("cost") ||
+          lower.includes("ingredient items") ||
+          lower.includes("packaging")
         ) {
           continue;
         }
 
-        const lbValue = extractLastLbQty(previousLine);
+        const lbValue = extractFirstLbQty(previousLine);
 
         if (lbValue !== null) {
           usage = lbValue;
           break;
         }
+      }
+
+      if (usage === null) {
+        usage = extractFirstLbQty(line);
       }
     }
 
@@ -282,6 +297,9 @@ function findPdfUsageForCode(lines, code) {
 async function parseCbfPdf(file, items) {
   const productionCode = getProductionCodeFromFileName(file.name);
   const lines = await extractPdfLines(file);
+
+  console.log("PDF:", file.name, "PO:", productionCode);
+  console.log("PDF LINES:", lines);
 
   const parsed = [];
 
@@ -300,8 +318,12 @@ async function parseCbfPdf(file, items) {
     }
   });
 
+  console.log("PARSED PDF ROWS:", parsed);
+
   if (parsed.length === 0) {
-    throw new Error("No matching CBF item numbers found in this PDF.");
+    throw new Error(
+      `No matching CBF item numbers found in ${file.name}. Check console PDF LINES.`
+    );
   }
 
   return parsed;
