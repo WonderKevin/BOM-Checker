@@ -47,6 +47,14 @@ const MONTHS = Array.from({ length: 12 }, (_, i) => {
 
 const BATCHES = Array.from({ length: 10 }, (_, i) => `Batch ${i + 1}`);
 
+function getNextBatchName(existingBatches = []) {
+  const numbers = existingBatches
+    .map((batch) => Number(String(batch).match(/\d+/)?.[0] || 0))
+    .filter((value) => Number.isFinite(value));
+
+  return `Batch ${Math.max(0, ...numbers) + 1}`;
+}
+
 function norm(v) {
   return String(v ?? "").trim().toLowerCase();
 }
@@ -121,12 +129,19 @@ function batchSummaryText(name, wm, cbf) {
 
 function extractFirstEachQty(text) {
   const clean = String(text || "").replace(/\s+/g, " ");
+  const beforeCost = clean.split("$")[0];
   const matches = [
-    ...clean.matchAll(/([0-9][0-9,]*\.?[0-9]*)\s*each\b/gi),
+    ...beforeCost.matchAll(/([0-9][0-9,]*\.?[0-9]*)\s*each\b/gi),
   ];
 
   if (!matches.length) return null;
   return num(matches[0][1]);
+}
+
+function extractStandaloneQty(text) {
+  const clean = String(text || "").replace(/\s+/g, " ").trim();
+  if (!/^[0-9][0-9,]*\.?[0-9]*$/.test(clean)) return null;
+  return num(clean);
 }
 
 function extractFirstLbQty(text) {
@@ -143,6 +158,19 @@ function extractFirstLbQty(text) {
 
 function isPackagingCode(code) {
   return /^(P|PL|PP|PC|PS)/i.test(String(code || ""));
+}
+
+function extractPackagingQty(lines, index) {
+  const line = lines[index] || "";
+  const direct = extractFirstEachQty(line);
+  if (direct !== null) return direct;
+
+  for (const offset of [1, -1, 2]) {
+    const nearby = extractStandaloneQty(lines[index + offset]);
+    if (nearby !== null) return nearby;
+  }
+
+  return extractFirstEachQty(lines.slice(index, index + 3).join(" "));
 }
 
 async function extractPdfLines(file) {
@@ -253,11 +281,7 @@ function findPdfUsageForCode(lines, code) {
     let usage = null;
 
     if (packaging) {
-      usage = extractFirstEachQty(line);
-
-      if (usage === null) {
-        usage = extractFirstEachQty(lines.slice(i, i + 3).join(" "));
-      }
+      usage = extractPackagingQty(lines, i);
     } else {
       for (let j = i - 1; j >= Math.max(0, i - 4); j--) {
         const previousLine = lines[j] || "";
@@ -336,7 +360,8 @@ export default function App() {
   const [modal, setModal] = useState(null);
   const [files, setFiles] = useState([]);
   const [message, setMessage] = useState("");
-  const [batchVisible, setBatchVisible] = useState(true);
+  const [visibleBatches, setVisibleBatches] = useState([]);
+  const [showAllItems, setShowAllItems] = useState(false);
 
   const [form, setForm] = useState({
     month: MONTHS[0],
@@ -346,16 +371,21 @@ export default function App() {
 
   useEffect(() => {
     loadData();
-  }, [form.month, form.batch_name]);
+  }, [form.month]);
 
   async function loadData() {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("bom_usage_rows")
       .select("*")
-      .eq("month", form.month)
-      .eq("batch", form.batch_name);
+      .eq("month", form.month);
 
-    if (data) setBomRows(data);
+    if (error) {
+      console.error(error);
+      setMessage(`Supabase load failed: ${error.message}`);
+      return;
+    }
+
+    setBomRows(data || []);
   }
 
   async function uploadBom() {
@@ -363,13 +393,15 @@ export default function App() {
 
     try {
       const bomType = modal;
+      const targetBatch =
+        String(form.batch_name || "").trim() || getNextBatchName(availableBatches);
 
       if (bomType === "WM") {
         await supabase
           .from("bom_usage_rows")
           .delete()
           .eq("month", form.month)
-          .eq("batch", form.batch_name)
+          .eq("batch", targetBatch)
           .eq("bom_type", "WM");
       }
 
@@ -382,7 +414,7 @@ export default function App() {
             : await parseCbfPdf(file, items);
 
         const cleanMonth = form.month.replaceAll(" ", "-").replaceAll("'", "");
-        const cleanBatch = form.batch_name.replaceAll(" ", "");
+        const cleanBatch = targetBatch.replaceAll(" ", "");
         const storagePath = `${bomType}/${cleanMonth}/${cleanBatch}/${Date.now()}-${file.name}`;
 
         const { error: storageError } = await supabase.storage
@@ -396,7 +428,7 @@ export default function App() {
           .insert({
             bom_type: bomType,
             month: form.month,
-            batch: form.batch_name,
+            batch: targetBatch,
             file_name: file.name,
             storage_path: storagePath,
           })
@@ -409,7 +441,7 @@ export default function App() {
           upload_id: uploadRow.id,
           bom_type: bomType,
           month: form.month,
-          batch: form.batch_name,
+          batch: targetBatch,
           item_code: r.item_code,
           description: r.description,
           production_code: r.production_code,
@@ -430,10 +462,90 @@ export default function App() {
       setMessage(`${bomType} BOM uploaded: ${allRows.length} values parsed.`);
       setModal(null);
       setFiles([]);
-      setBatchVisible(true);
+      setVisibleBatches((current) =>
+        current.includes(targetBatch)
+          ? current
+          : [...current, targetBatch]
+      );
     } catch (err) {
       console.error(err);
       alert(err.message || "Upload failed.");
+    }
+  }
+
+  async function saveEditedUsage(row, group, bomType, rawValue) {
+    const value = positiveNum(rawValue);
+    const payload = {
+      upload_id: null,
+      bom_type: bomType,
+      month: form.month,
+      batch: group.batch,
+      item_code: row.item_code,
+      description: row.description,
+      production_code: group.production_code,
+      usage_lbs: value,
+      wm_usage: bomType === "WM" ? value : null,
+      cbf_usage: bomType === "CBF" ? value : null,
+      row_order: row.row_order,
+    };
+
+    const match = {
+      month: form.month,
+      batch: group.batch,
+      item_code: row.item_code,
+      production_code: group.production_code,
+      bom_type: bomType,
+    };
+
+    const { error: deleteError } = await supabase
+      .from("bom_usage_rows")
+      .delete()
+      .match(match);
+
+    if (deleteError) throw deleteError;
+
+    const { data, error } = await supabase
+      .from("bom_usage_rows")
+      .insert(payload)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    setBomRows((current) => [
+      ...current.filter(
+        (candidate) =>
+          !(
+            candidate.month === form.month &&
+            candidate.batch === group.batch &&
+            candidate.item_code === row.item_code &&
+            candidate.production_code === group.production_code &&
+            candidate.bom_type === bomType
+          )
+      ),
+      data || payload,
+    ]);
+
+    setMessage(
+      `${bomType} ${row.item_code} ${group.batch} ${group.production_code} saved to Supabase.`
+    );
+  }
+
+  async function editUsageValue(row, group, bomType, currentValue) {
+    const label = bomType === "WM" ? `Used (${group.production_code})` : `CBF-${group.production_code}`;
+    const next = window.prompt(
+      `Edit ${label} for ${row.description} in ${group.batch}`,
+      Number(currentValue || 0).toFixed(2)
+    );
+
+    if (next === null) return;
+    const value = positiveNum(next);
+
+    try {
+      await saveEditedUsage(row, group, bomType, value);
+    } catch (error) {
+      console.error(error);
+      alert(error.message || "Could not save edited value.");
     }
   }
 
@@ -446,11 +558,11 @@ export default function App() {
         "CBF Item #": row.item_code,
       };
 
-      productionCodes.forEach((code) => {
-        const v = row.values[code] || { wm: 0, cbf: 0 };
-        record[`Used (${code})`] = Number(v.wm.toFixed(2));
-        record[`CBF-${code}`] = Number(v.cbf.toFixed(2));
-        record[`Variance ${code}`] = variancePct(v.wm, v.cbf);
+      visibleGroups.forEach((group) => {
+        const v = row.values[group.key] || { wm: 0, cbf: 0 };
+        record[`${group.batch} Used (${group.production_code})`] = Number(v.wm.toFixed(2));
+        record[`${group.batch} CBF-${group.production_code}`] = Number(v.cbf.toFixed(2));
+        record[`${group.batch} Variance ${group.production_code}`] = variancePct(v.wm, v.cbf);
       });
 
       const batchTotal = batchTotalsByRow[row.item_code] || {
@@ -473,21 +585,55 @@ export default function App() {
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
 
-    XLSX.utils.book_append_sheet(wb, ws, form.batch_name);
+    XLSX.utils.book_append_sheet(wb, ws, form.month);
 
     XLSX.writeFile(
       wb,
-      `BOM_Checker_${form.month
-        .replaceAll(" ", "_")
-        .replaceAll("'", "")}_${form.batch_name.replaceAll(" ", "_")}.xlsx`
+      `BOM_Checker_${form.month.replaceAll(" ", "_").replaceAll("'", "")}.xlsx`
     );
   }
 
-  const productionCodes = useMemo(() => {
-    return [...new Set(bomRows.map((r) => r.production_code))]
-      .filter(Boolean)
-      .sort((a, b) => Number(a) - Number(b));
+  const availableBatches = useMemo(() => {
+    return [...new Set(bomRows.map((r) => r.batch).filter(Boolean))].sort(
+      (a, b) => Number(String(a).match(/\d+/)?.[0] || 0) - Number(String(b).match(/\d+/)?.[0] || 0)
+    );
   }, [bomRows]);
+
+  useEffect(() => {
+    setVisibleBatches((current) => {
+      if (!availableBatches.length) return [];
+      const kept = current.filter((batch) => availableBatches.includes(batch));
+      const added = availableBatches.filter((batch) => !current.includes(batch));
+      return kept.length ? [...kept, ...added] : availableBatches;
+    });
+  }, [availableBatches.join("|")]);
+
+  const filteredBomRows = useMemo(() => {
+    if (!availableBatches.length) return bomRows;
+    return bomRows.filter((r) => visibleBatches.includes(r.batch));
+  }, [bomRows, visibleBatches, availableBatches]);
+
+  const visibleGroups = useMemo(() => {
+    const groups = new Map();
+
+    filteredBomRows.forEach((row) => {
+      if (!row.production_code) return;
+      const key = `${row.batch}::${row.production_code}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          batch: row.batch,
+          production_code: row.production_code,
+        });
+      }
+    });
+
+    return [...groups.values()].sort((a, b) => {
+      const batchSort = Number(String(a.batch).match(/\d+/)?.[0] || 0) - Number(String(b.batch).match(/\d+/)?.[0] || 0);
+      if (batchSort !== 0) return batchSort;
+      return Number(a.production_code) - Number(b.production_code);
+    });
+  }, [filteredBomRows]);
 
   const wideRows = useMemo(() => {
     const grouped = new Map();
@@ -501,11 +647,12 @@ export default function App() {
       });
     });
 
-    bomRows.forEach((r) => {
+    filteredBomRows.forEach((r) => {
       const row = grouped.get(r.item_code);
       if (!row) return;
 
-      const current = row.values[r.production_code] || { wm: 0, cbf: 0 };
+      const key = `${r.batch}::${r.production_code}`;
+      const current = row.values[key] || { wm: 0, cbf: 0 };
 
       if (r.bom_type === "WM") {
         current.wm += Number(r.wm_usage ?? r.usage_lbs ?? 0);
@@ -515,11 +662,11 @@ export default function App() {
         current.cbf += Number(r.cbf_usage ?? r.usage_lbs ?? 0);
       }
 
-      row.values[r.production_code] = current;
+      row.values[key] = current;
     });
 
     return [...grouped.values()].sort((a, b) => a.row_order - b.row_order);
-  }, [items, bomRows]);
+  }, [items, filteredBomRows]);
 
   const batchTotalsByRow = useMemo(() => {
     const output = {};
@@ -528,9 +675,9 @@ export default function App() {
       let wm = 0;
       let cbf = 0;
 
-      productionCodes.forEach((code) => {
-        wm += Number(row.values[code]?.wm || 0);
-        cbf += Number(row.values[code]?.cbf || 0);
+      visibleGroups.forEach((group) => {
+        wm += Number(row.values[group.key]?.wm || 0);
+        cbf += Number(row.values[group.key]?.cbf || 0);
       });
 
       const variance = varianceValue(wm, cbf);
@@ -546,22 +693,58 @@ export default function App() {
     });
 
     return output;
-  }, [wideRows, productionCodes]);
+  }, [wideRows, visibleGroups]);
 
   const visibleWideRows = useMemo(() => {
+    if (showAllItems) return wideRows;
     if (!bomRows.length) return wideRows;
 
     return wideRows.filter((row) => {
-      const hasAnyValue = productionCodes.some((code) => {
-        const v = row.values[code] || { wm: 0, cbf: 0 };
+      const hasAnyValue = visibleGroups.some((group) => {
+        const v = row.values[group.key] || { wm: 0, cbf: 0 };
         return Number(v.wm || 0) !== 0 || Number(v.cbf || 0) !== 0;
       });
 
       return hasAnyValue;
     });
-  }, [wideRows, bomRows, productionCodes]);
+  }, [wideRows, bomRows, visibleGroups, showAllItems]);
 
-  const visibleProductionCodes = batchVisible ? productionCodes : [];
+  const summaryRows = useMemo(() => {
+    return visibleWideRows.map((row) => {
+      const total = batchTotalsByRow[row.item_code] || {
+        wm: 0,
+        cbf: 0,
+        diff: 0,
+        variance: 0,
+        summary: "",
+      };
+
+      return { ...row, total };
+    });
+  }, [visibleWideRows, batchTotalsByRow]);
+
+  function toggleBatch(batch) {
+    setVisibleBatches((current) =>
+      current.includes(batch)
+        ? current.filter((item) => item !== batch)
+        : [...current, batch]
+    );
+  }
+
+  function openUploadModal(type) {
+    const mode = availableBatches.length ? "existing" : "new";
+    const batchName = availableBatches.length
+      ? availableBatches[0]
+      : getNextBatchName(availableBatches);
+
+    setFiles([]);
+    setForm((current) => ({
+      ...current,
+      batch_mode: mode,
+      batch_name: batchName,
+    }));
+    setModal(type);
+  }
 
   return (
     <div className="app">
@@ -593,9 +776,25 @@ export default function App() {
               </div>
 
               <div className="top-actions">
-                <button className="ghost">Month: {form.month}</button>
-                <button onClick={() => setModal("WM")}>WM BOM</button>
-                <button onClick={() => setModal("CBF")}>CBF BOM</button>
+                <label className="monthFilter">
+                  <span>Month</span>
+                  <select
+                    value={form.month}
+                    onChange={(e) => setForm({ ...form, month: e.target.value })}
+                  >
+                    {MONTHS.map((m) => (
+                      <option key={m}>{m}</option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  className="ghost"
+                  onClick={() => setShowAllItems((value) => !value)}
+                >
+                  {showAllItems ? "Hide Empty Items" : "Show All Items"}
+                </button>
+                <button onClick={() => openUploadModal("WM")}>WM BOM</button>
+                <button onClick={() => openUploadModal("CBF")}>CBF BOM</button>
                 <button onClick={downloadExcel} className="download">
                   Download Excel
                 </button>
@@ -603,6 +802,27 @@ export default function App() {
             </header>
 
             {message && <p className="notice">{message}</p>}
+
+            {!!availableBatches.length && (
+              <div className="batchFilters">
+                <span>Batch filter</span>
+                {availableBatches.map((batch) => (
+                  <button
+                    key={batch}
+                    className={visibleBatches.includes(batch) ? "active" : ""}
+                    onClick={() => toggleBatch(batch)}
+                  >
+                    {batch}
+                  </button>
+                ))}
+                <button
+                  className={visibleBatches.length === availableBatches.length ? "active" : ""}
+                  onClick={() => setVisibleBatches(availableBatches)}
+                >
+                  All
+                </button>
+              </div>
+            )}
 
             <div className="tableCard">
               <div className="tableWrap">
@@ -617,31 +837,29 @@ export default function App() {
                         CBF Item #
                       </th>
 
-                      {batchVisible && (
-                        <th colSpan={productionCodes.length * 3 + 5}>
-                          {form.batch_name}
+                      {visibleGroups.map((group) => (
+                        <th key={group.key} colSpan="3">
+                          {group.batch} | {group.production_code}
                         </th>
-                      )}
+                      ))}
+
+                      <th colSpan="5">Total</th>
                     </tr>
 
                     <tr>
-                      {visibleProductionCodes.map((code) => (
-                        <React.Fragment key={code}>
-                          <th>Used ({code})</th>
-                          <th>CBF-{code}</th>
+                      {visibleGroups.map((group) => (
+                        <React.Fragment key={group.key}>
+                          <th>Used ({group.production_code})</th>
+                          <th>CBF-{group.production_code}</th>
                           <th>Variance</th>
                         </React.Fragment>
                       ))}
 
-                      {batchVisible && (
-                        <>
-                          <th>Total WM</th>
-                          <th>Total CBF</th>
-                          <th>Total Variance</th>
-                          <th>Total LBS</th>
-                          <th>Summary</th>
-                        </>
-                      )}
+                      <th>Total WM</th>
+                      <th>Total CBF</th>
+                      <th>Total Variance</th>
+                      <th>Total LBS</th>
+                      <th>Summary</th>
                     </tr>
                   </thead>
 
@@ -665,14 +883,30 @@ export default function App() {
                             {row.item_code}
                           </td>
 
-                          {visibleProductionCodes.map((code) => {
-                            const v = row.values[code] || { wm: 0, cbf: 0 };
+                          {visibleGroups.map((group) => {
+                            const v = row.values[group.key] || { wm: 0, cbf: 0 };
                             const diff = lbsDiff(v.wm, v.cbf);
 
                             return (
-                              <React.Fragment key={code}>
-                                <td>{v.wm.toFixed(2)}</td>
-                                <td>{v.cbf.toFixed(2)}</td>
+                              <React.Fragment key={group.key}>
+                                <td
+                                  className="editableCell"
+                                  title="Double-click to edit WM value"
+                                  onDoubleClick={() =>
+                                    editUsageValue(row, group, "WM", v.wm)
+                                  }
+                                >
+                                  {v.wm.toFixed(2)}
+                                </td>
+                                <td
+                                  className="editableCell"
+                                  title="Double-click to edit CBF value"
+                                  onDoubleClick={() =>
+                                    editUsageValue(row, group, "CBF", v.cbf)
+                                  }
+                                >
+                                  {v.cbf.toFixed(2)}
+                                </td>
                                 <td
                                   className={
                                     diff < 0 ? "bad" : diff > 0 ? "good" : ""
@@ -684,22 +918,18 @@ export default function App() {
                             );
                           })}
 
-                          {batchVisible && (
-                            <>
-                              <td>{batchTotal.wm.toFixed(2)}</td>
-                              <td>{batchTotal.cbf.toFixed(2)}</td>
-                              <td>{batchTotal.variance.toFixed(2)}%</td>
-                              <td>{batchTotal.diff.toFixed(2)} lbs</td>
-                              <td
-                                className={`summary ${summaryClass(
-                                  row.item_code,
-                                  batchTotal.variance
-                                )}`}
-                              >
-                                {batchTotal.summary}
-                              </td>
-                            </>
-                          )}
+                          <td>{batchTotal.wm.toFixed(2)}</td>
+                          <td>{batchTotal.cbf.toFixed(2)}</td>
+                          <td>{batchTotal.variance.toFixed(2)}%</td>
+                          <td>{batchTotal.diff.toFixed(2)} lbs</td>
+                          <td
+                            className={`summary ${summaryClass(
+                              row.item_code,
+                              batchTotal.variance
+                            )}`}
+                          >
+                            {batchTotal.summary}
+                          </td>
                         </tr>
                       );
                     })}
@@ -707,6 +937,30 @@ export default function App() {
                 </table>
               </div>
             </div>
+
+            {!!summaryRows.length && (
+              <section className="analysisPanel">
+                <div className="analysisHeader">
+                  <h2>Summary</h2>
+                  <p>Visible batch totals for {form.month}</p>
+                </div>
+
+                <div className="analysisGrid">
+                  {summaryRows.map((row) => (
+                    <div
+                      key={row.item_code}
+                      className={`analysisLine ${summaryClass(
+                        row.item_code,
+                        row.total.variance
+                      )}`}
+                    >
+                      <strong>{row.description}</strong>
+                      <span>{row.total.summary}</span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
           </>
         )}
 
@@ -759,18 +1013,58 @@ export default function App() {
               </select>
             </label>
 
-            <label>
-              Batch
-              <select
-                value={form.batch_name}
-                onChange={(e) =>
-                  setForm({ ...form, batch_name: e.target.value })
+            <div className="modeGroup" role="group" aria-label="Batch mode">
+              <button
+                type="button"
+                className={form.batch_mode === "existing" ? "active" : ""}
+                disabled={!availableBatches.length}
+                onClick={() =>
+                  setForm({
+                    ...form,
+                    batch_mode: "existing",
+                    batch_name: availableBatches[0] || getNextBatchName(availableBatches),
+                  })
                 }
               >
-                {BATCHES.map((b) => (
-                  <option key={b}>{b}</option>
-                ))}
-              </select>
+                Existing Batch
+              </button>
+              <button
+                type="button"
+                className={form.batch_mode === "new" ? "active" : ""}
+                onClick={() =>
+                  setForm({
+                    ...form,
+                    batch_mode: "new",
+                    batch_name: getNextBatchName(availableBatches),
+                  })
+                }
+              >
+                New Batch
+              </button>
+            </div>
+
+            <label>
+              Batch
+              {form.batch_mode === "existing" && availableBatches.length ? (
+                <select
+                  value={form.batch_name}
+                  onChange={(e) =>
+                    setForm({ ...form, batch_name: e.target.value })
+                  }
+                >
+                  {availableBatches.map((b) => (
+                    <option key={b}>{b}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  value={form.batch_name}
+                  placeholder="Batch 1"
+                  onChange={(e) =>
+                    setForm({ ...form, batch_name: e.target.value })
+                  }
+                />
+              )}
             </label>
 
             <input

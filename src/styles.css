@@ -10,15 +10,12 @@ body {
 }
 
 .app {
-  display: flex;
+  display: block;
   min-height: 100vh;
 }
 
 .sidebar {
-  width: 240px;
-  background: linear-gradient(180deg, #0f172a, #111827);
-  color: white;
-  padding: 24px 16px;
+  display: none;
 }
 
 .sidebar h2 {
@@ -33,7 +30,7 @@ body {
   color: #cbd5e1;
   padding: 12px 14px;
   text-align: left;
-  border-radius: 10px;
+  border-radius: 8px;
   margin-bottom: 8px;
   font-weight: 600;
   cursor: pointer;
@@ -69,8 +66,11 @@ body {
 }
 
 .top-actions {
+  align-items: center;
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+  justify-content: flex-end;
 }
 
 button {
@@ -78,7 +78,7 @@ button {
   background: #2563eb;
   color: white;
   padding: 10px 14px;
-  border-radius: 10px;
+  border-radius: 8px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -98,7 +98,7 @@ button.ghost,
   background: #dbeafe;
   color: #1e3a8a;
   padding: 14px 16px;
-  border-radius: 12px;
+  border-radius: 8px;
   margin-bottom: 18px;
 }
 
@@ -113,7 +113,7 @@ button.ghost,
 .tableCard {
   background: white;
   border: 1px solid #e2e8f0;
-  border-radius: 16px;
+  border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
 }
@@ -219,7 +219,7 @@ select,
 input[type="file"] {
   border: 1px solid #cbd5e1;
   padding: 10px 12px;
-  border-radius: 10px;
+  border-radius: 8px;
   background: white;
 }
 
@@ -239,7 +239,7 @@ input[type="file"] {
 
 .box {
   background: white;
-  border-radius: 18px;
+  border-radius: 8px;
   padding: 26px;
   width: 440px;
   box-shadow: 0 25px 80px rgba(15, 23, 42, 0.35);
@@ -295,4 +295,132 @@ input[type="file"] {
 
 .download:hover {
   background: #15803d;
+}
+.batchFilters {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.batchFilters span {
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.batchFilters button {
+  background: white;
+  border: 1px solid #cbd5e1;
+  color: #0f172a;
+  padding: 8px 12px;
+}
+
+.batchFilters button.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: white;
+}
+
+.editableCell {
+  cursor: cell;
+  position: relative;
+}
+
+.editableCell:hover {
+  background: #eff6ff !important;
+  box-shadow: inset 0 0 0 2px #93c5fd;
+}
+
+.monthFilter {
+  align-items: center;
+  background: white;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  display: flex;
+  gap: 8px;
+  padding: 6px 10px;
+}
+
+.monthFilter span {
+  color: #475569;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.monthFilter select {
+  border: 0;
+  font-weight: 800;
+  padding: 2px 0;
+}
+
+.modeGroup {
+  background: #e2e8f0;
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  grid-template-columns: 1fr 1fr;
+  margin-top: 14px;
+  padding: 4px;
+}
+
+.modeGroup button {
+  background: transparent;
+  color: #475569;
+}
+
+.modeGroup button.active {
+  background: white;
+  color: #0f172a;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
+}
+
+.modeGroup button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.analysisPanel {
+  margin-top: 18px;
+}
+
+.analysisHeader {
+  align-items: end;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.analysisHeader h2 {
+  font-size: 18px;
+  margin: 0;
+}
+
+.analysisHeader p {
+  color: #64748b;
+  margin: 0;
+}
+
+.analysisGrid {
+  display: grid;
+  gap: 8px;
+}
+
+.analysisLine {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+}
+
+.analysisLine strong {
+  font-size: 13px;
+}
+
+.analysisLine span {
+  font-size: 14px;
 }
