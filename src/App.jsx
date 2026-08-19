@@ -457,6 +457,38 @@ export default function App() {
     setBomRows(data || []);
   }
 
+  async function saveUsageRows(rows) {
+    for (const row of rows) {
+      const match = {
+        month: row.month,
+        batch: row.batch,
+        item_code: row.item_code,
+        production_code: row.production_code,
+        bom_type: row.bom_type,
+      };
+
+      const { data: existingRows, error: lookupError } = await supabase
+        .from("bom_usage_rows")
+        .select("id")
+        .match(match)
+        .limit(1);
+
+      if (lookupError) throw lookupError;
+
+      if (existingRows?.length) {
+        const { error } = await supabase
+          .from("bom_usage_rows")
+          .update(row)
+          .eq("id", existingRows[0].id);
+
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("bom_usage_rows").insert(row);
+        if (error) throw error;
+      }
+    }
+  }
+
   async function uploadBom() {
     if (!files.length) return alert("Choose a file first.");
 
@@ -530,9 +562,7 @@ export default function App() {
         allRows = [...allRows, ...rows];
       }
 
-      const { error } = await supabase.from("bom_usage_rows").insert(allRows);
-      if (error) throw error;
-
+      await saveUsageRows(allRows);
       await loadData();
 
       setMessage(`${[...new Set(uploadNames)].join(", ")} uploaded: ${allRows.length} values parsed and saved.`);
