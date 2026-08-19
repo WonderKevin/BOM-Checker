@@ -73,9 +73,32 @@ function positiveNum(v) {
   return Math.abs(num(v));
 }
 
+function cleanProductionCode(value) {
+  const raw = String(value || "").trim();
+  const match = raw.match(/\d+/);
+  return match ? match[0] : raw || "PDF";
+}
+
 function getProductionCodeFromFileName(fileName) {
-  const match = String(fileName || "").match(/W(?:M)?\s*(\d+)(?:[.\-_]\d+)?/i);
-  return match ? match[1] : "PDF";
+  const namedMatch = String(fileName || "").match(/\b(?:WM|PO)[\s\-_]*(\d+)\b/i);
+  if (namedMatch) return namedMatch[1];
+
+  const fallbackMatch = String(fileName || "").match(/(\d+)/);
+  return fallbackMatch ? fallbackMatch[1] : "PDF";
+}
+
+function wmColumnLabel(code) {
+  return `PO-${cleanProductionCode(code)}`;
+}
+
+function cbfColumnLabel(code) {
+  return `WM${cleanProductionCode(code)}`;
+}
+
+function uploadLabel(bomType, codes) {
+  const cleanCodes = [...new Set(codes.map(cleanProductionCode).filter(Boolean))];
+  const codeLabel = cleanCodes.length ? cleanCodes.join("-") : "PDF";
+  return bomType === "WM" ? `WM-PO-${codeLabel}` : `CBF-WM${codeLabel}`;
 }
 
 function varianceValue(wm, cbf) {
@@ -125,6 +148,17 @@ function batchSummaryText(name, wm, cbf) {
   return `${name}: There is a ${pct.toFixed(
     2
   )}% variance. CBF used ${diff.toFixed(2)} lbs less than expected.`;
+}
+
+function getWmHeaderProductionCode(header) {
+  const value = String(header || "").trim();
+  const usedMatch = value.match(/^Used\s*\(([^)]+)\)/i);
+  if (usedMatch) return cleanProductionCode(usedMatch[1]);
+
+  const poMatch = value.match(/^(?:WM[\s\-_]*)?PO[\s\-_]*(\d+)$/i);
+  if (poMatch) return poMatch[1];
+
+  return null;
 }
 
 function extractFirstEachQty(text) {
@@ -227,19 +261,21 @@ async function parseWmExcel(file, items) {
   });
 
   const headerRowIndex = rows.findIndex((row) =>
-    row.some((cell) => /^Used\s*\(/i.test(String(cell)))
+    row.some((cell) => getWmHeaderProductionCode(cell) !== null)
   );
 
-  if (headerRowIndex < 0) throw new Error("No Used(...) columns found.");
+  if (headerRowIndex < 0) {
+    throw new Error("No WM PO columns found. Expected Used(...), PO-1000, or WM-PO-1000.");
+  }
 
   const headers = rows[headerRowIndex].map((h) => String(h || "").trim());
   const itemLookup = new Map(items.map((item) => [norm(item.description), item]));
 
   const groups = headers
     .map((header, index) => {
-      const match = header.match(/^Used\s*\(([^)]+)\)/i);
-      if (!match) return null;
-      return { prod: match[1].trim(), usedCol: index };
+      const prod = getWmHeaderProductionCode(header);
+      if (!prod) return null;
+      return { prod, usedCol: index };
     })
     .filter(Boolean);
 
@@ -406,6 +442,7 @@ export default function App() {
       }
 
       let allRows = [];
+      const uploadNames = [];
 
       for (const file of files) {
         const parsed =
@@ -413,9 +450,15 @@ export default function App() {
             ? await parseWmExcel(file, items)
             : await parseCbfPdf(file, items);
 
+        const currentUploadLabel = uploadLabel(
+          bomType,
+          parsed.map((row) => row.production_code)
+        );
+        uploadNames.push(currentUploadLabel);
         const cleanMonth = form.month.replaceAll(" ", "-").replaceAll("'", "");
         const cleanBatch = targetBatch.replaceAll(" ", "");
-        const storagePath = `${bomType}/${cleanMonth}/${cleanBatch}/${Date.now()}-${file.name}`;
+        const cleanUpload = currentUploadLabel.replace(/[^a-z0-9-]+/gi, "-");
+        const storagePath = `${bomType}/${cleanMonth}/${cleanBatch}/${cleanUpload}/${Date.now()}-${file.name}`;
 
         const { error: storageError } = await supabase.storage
           .from("bom-files")
@@ -429,7 +472,7 @@ export default function App() {
             bom_type: bomType,
             month: form.month,
             batch: targetBatch,
-            file_name: file.name,
+            file_name: `${currentUploadLabel} - ${file.name}`,
             storage_path: storagePath,
           })
           .select()
@@ -459,7 +502,7 @@ export default function App() {
 
       await loadData();
 
-      setMessage(`${bomType} BOM uploaded: ${allRows.length} values parsed.`);
+      setMessage(`${[...new Set(uploadNames)].join(", ")} uploaded: ${allRows.length} values parsed and saved.`);
       setModal(null);
       setFiles([]);
       setVisibleBatches((current) =>
@@ -532,7 +575,7 @@ export default function App() {
   }
 
   async function editUsageValue(row, group, bomType, currentValue) {
-    const label = bomType === "WM" ? `Used (${group.production_code})` : `CBF-${group.production_code}`;
+    const label = bomType === "WM" ? wmColumnLabel(group.production_code) : cbfColumnLabel(group.production_code);
     const next = window.prompt(
       `Edit ${label} for ${row.description} in ${group.batch}`,
       Number(currentValue || 0).toFixed(2)
@@ -560,8 +603,8 @@ export default function App() {
 
       visibleGroups.forEach((group) => {
         const v = row.values[group.key] || { wm: 0, cbf: 0 };
-        record[`${group.batch} Used (${group.production_code})`] = Number(v.wm.toFixed(2));
-        record[`${group.batch} CBF-${group.production_code}`] = Number(v.cbf.toFixed(2));
+        record[`${group.batch} ${wmColumnLabel(group.production_code)}`] = Number(v.wm.toFixed(2));
+        record[`${group.batch} ${cbfColumnLabel(group.production_code)}`] = Number(v.cbf.toFixed(2));
         record[`${group.batch} Variance ${group.production_code}`] = variancePct(v.wm, v.cbf);
       });
 
@@ -849,8 +892,8 @@ export default function App() {
                     <tr>
                       {visibleGroups.map((group) => (
                         <React.Fragment key={group.key}>
-                          <th>Used ({group.production_code})</th>
-                          <th>CBF-{group.production_code}</th>
+                          <th>{wmColumnLabel(group.production_code)}</th>
+                          <th>{cbfColumnLabel(group.production_code)}</th>
                           <th>Variance</th>
                         </React.Fragment>
                       ))}
