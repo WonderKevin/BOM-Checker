@@ -27,6 +27,9 @@ const HARD_CODED_ITEMS = [
   ['Wonder Monday 3" Lids', "PP5002"],
   ['Wonder Monday Blank 3" Bases', "PP5003"],
   ['Wonder Monday 3" Clear Base', "PP5004"],
+  ['Wonder Monday 3" Lids', "PP2723"],
+  ['Black 3" Bases', "PP2721"],
+  ['Wonder Monday 3" Clear Base', "PP2722"],
   ["Target 6 pack carton", "PC2894"],
   ["SRP Mastercase 12pk", "PC2891"],
 ].map(([description, item_code], index) => ({
@@ -161,6 +164,28 @@ function getWmHeaderProductionCode(header) {
   return null;
 }
 
+function buildDescriptionLookup(items) {
+  const lookup = new Map();
+
+  items.forEach((item) => {
+    const key = norm(item.description);
+    if (!lookup.has(key)) lookup.set(key, item);
+  });
+
+  return lookup;
+}
+
+function findItemByRow(row, itemByCode, itemByDescription, firstUsageColumn) {
+  const codeSearchLimit = firstUsageColumn > 0 ? firstUsageColumn : row.length;
+
+  for (let index = 0; index < codeSearchLimit; index += 1) {
+    const code = compact(row[index]);
+    if (itemByCode.has(code)) return itemByCode.get(code);
+  }
+
+  return itemByDescription.get(norm(row[0]));
+}
+
 function extractFirstEachQty(text) {
   const clean = String(text || "").replace(/\s+/g, " ");
   const beforeCost = clean.split("$")[0];
@@ -269,7 +294,8 @@ async function parseWmExcel(file, items) {
   }
 
   const headers = rows[headerRowIndex].map((h) => String(h || "").trim());
-  const itemLookup = new Map(items.map((item) => [norm(item.description), item]));
+  const itemByCode = new Map(items.map((item) => [compact(item.item_code), item]));
+  const itemByDescription = buildDescriptionLookup(items);
 
   const groups = headers
     .map((header, index) => {
@@ -279,13 +305,20 @@ async function parseWmExcel(file, items) {
     })
     .filter(Boolean);
 
+  const firstUsageColumn = Math.min(...groups.map((group) => group.usedCol));
   const parsed = [];
 
   for (let r = headerRowIndex + 1; r < rows.length; r++) {
     const description = String(rows[r][0] || "").trim();
     if (!description || norm(description) === "cbf") continue;
 
-    const matched = itemLookup.get(norm(description));
+    const matched = findItemByRow(
+      rows[r],
+      itemByCode,
+      itemByDescription,
+      firstUsageColumn
+    );
+
     if (!matched) continue;
 
     groups.forEach((g) => {

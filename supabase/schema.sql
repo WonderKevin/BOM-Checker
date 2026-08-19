@@ -4,11 +4,13 @@ create extension if not exists pgcrypto;
 
 create table if not exists public.items (
   id uuid primary key default gen_random_uuid(),
-  description text not null unique,
+  description text not null,
   item_code text not null unique,
   row_order integer,
   created_at timestamptz not null default now()
 );
+
+alter table public.items drop constraint if exists items_description_key;
 
 create table if not exists public.bom_uploads (
   id uuid primary key default gen_random_uuid(),
@@ -90,8 +92,11 @@ insert into public.items (description, item_code, row_order) values
 ('Wonder Monday 3" Lids','PP5002',17),
 ('Wonder Monday Blank 3" Bases','PP5003',18),
 ('Wonder Monday 3" Clear Base','PP5004',19),
-('Target 6 pack carton','PC2894',20),
-('SRP Mastercase 12pk','PC2891',21)
+('Wonder Monday 3" Lids','PP2723',20),
+('Black 3" Bases','PP2721',21),
+('Wonder Monday 3" Clear Base','PP2722',22),
+('Target 6 pack carton','PC2894',23),
+('SRP Mastercase 12pk','PC2891',24)
 on conflict (item_code) do update set
   description = excluded.description,
   row_order = excluded.row_order;
